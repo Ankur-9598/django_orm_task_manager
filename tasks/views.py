@@ -1,4 +1,3 @@
-from turtle import update
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.views import LoginView
 from django.forms import ModelForm, ValidationError

@@ -1,3 +1,4 @@
+from turtle import update
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.views import LoginView
 from django.forms import ModelForm, ValidationError
@@ -8,6 +9,7 @@ from django.views.generic.list import ListView
 from django.contrib.auth.mixins import LoginRequiredMixin
 
 from tasks.models import Task
+from django.db.models import F
 
 
 class AuthorisedTaskManager(LoginRequiredMixin):
@@ -15,32 +17,12 @@ class AuthorisedTaskManager(LoginRequiredMixin):
         return Task.objects.filter(deleted=False, user=self.request.user)
 
 class TaskCreateForm(ModelForm):
-    user = None
-    def __init__(self, *args, **kwargs):
-        self.request = kwargs.pop('request')
-        self.user = self.request.user
-        super(TaskCreateForm, self).__init__(*args, **kwargs)
 
     def clean_title(self):
         title = self.cleaned_data['title']
         if len(title) < 10:
             raise ValidationError('Title must be at least 10 characters long')
         return title.upper()
-
-    def clean(self):
-        cleaned_data = super().clean()
-        priority = cleaned_data.get('priority')
-
-        task = Task.objects.filter(priority__exact=priority, deleted=False, user=self.user)
-
-        while task.exists():
-            prev_task_id = task[0].id
-            task.update(priority=priority+1)
-            priority += 1
-            task = Task.objects.filter(priority=priority, deleted=False, user=self.user).exclude(pk=prev_task_id)
-
-        return cleaned_data
-
     class Meta:
         model = Task
         fields = ['title', 'description', 'priority', 'completed']
@@ -56,12 +38,25 @@ class GenericTaskCreateView(LoginRequiredMixin, CreateView):
         self.object = form.save()
         self.object.user = self.request.user
         self.object.save()
+
+        priority = self.object.priority
+
+        updated_tasks = []
+        tasks = Task.objects.filter(deleted=False, user=self.request.user).select_for_update()
+        task_to_update = tasks.filter(priority=priority).exclude(pk=self.object.id)
+
+        while task_to_update.exists():
+            excluded_task_id = task_to_update[0].id
+
+            curr_task = tasks.get(id=excluded_task_id)
+            curr_task.priority = priority + 1
+            updated_tasks.append(curr_task)
+
+            priority += 1
+            task_to_update = tasks.filter(priority=priority).exclude(pk=excluded_task_id)
+
+        Task.objects.bulk_update(updated_tasks, ['priority'])
         return HttpResponseRedirect(self.get_success_url())
-    
-    def get_form_kwargs(self):
-        kwargs = super(GenericTaskCreateView, self).get_form_kwargs()
-        kwargs['request'] = self.request
-        return kwargs
 
 
 class GenericTaskDetailView(AuthorisedTaskManager, DetailView):

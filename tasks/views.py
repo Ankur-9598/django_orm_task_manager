@@ -8,6 +8,7 @@ from django.views.generic.list import ListView
 from django.contrib.auth.mixins import LoginRequiredMixin
 
 from tasks.models import Task
+from django.db import transaction
 from django.db.models import F
 
 
@@ -41,20 +42,22 @@ class GenericTaskCreateView(LoginRequiredMixin, CreateView):
         priority = self.object.priority
 
         updated_tasks = []
-        tasks = Task.objects.filter(deleted=False, user=self.request.user).select_for_update()
-        task_to_update = tasks.filter(priority=priority).exclude(pk=self.object.id)
+        with transaction.atomic():
+            tasks = Task.objects.filter(deleted=False, user=self.request.user).select_for_update()
+            task_to_update = tasks.filter(priority=priority).exclude(pk=self.object.id)
 
-        while task_to_update.exists():
-            excluded_task_id = task_to_update[0].id
+            while task_to_update.exists():
+                excluded_task_id = task_to_update[0].id
 
-            curr_task = tasks.get(id=excluded_task_id)
-            curr_task.priority = priority + 1
-            updated_tasks.append(curr_task)
+                curr_task = tasks.get(id=excluded_task_id)
+                curr_task.priority = F('priority') + 1
+                updated_tasks.append(curr_task)
 
-            priority += 1
-            task_to_update = tasks.filter(priority=priority).exclude(pk=excluded_task_id)
+                priority += 1
+                task_to_update = tasks.filter(priority=priority).exclude(pk=excluded_task_id)
 
-        Task.objects.bulk_update(updated_tasks, ['priority'])
+            Task.objects.bulk_update(updated_tasks, ['priority'])
+
         return HttpResponseRedirect(self.get_success_url())
 
 
@@ -70,6 +73,32 @@ class GenericTaskUpdateView(AuthorisedTaskManager, UpdateView):
     template_name = 'task_update.html'
     extra_context = {'title': 'Update Todo'}
     success_url = '/tasks'
+
+    def form_valid(self, form):
+        self.object = form.save()
+        self.object.user = self.request.user
+        self.object.save()
+
+        priority = self.object.priority
+
+        updated_tasks = []
+        with transaction.atomic():
+            tasks = Task.objects.filter(deleted=False, user=self.request.user).select_for_update()
+            task_to_update = tasks.filter(priority=priority).exclude(pk=self.object.id)
+
+            while task_to_update.exists():
+                excluded_task_id = task_to_update[0].id
+
+                curr_task = tasks.get(id=excluded_task_id)
+                curr_task.priority = F('priority') + 1
+                updated_tasks.append(curr_task)
+
+                priority += 1
+                task_to_update = tasks.filter(priority=priority).exclude(pk=excluded_task_id)
+                
+            Task.objects.bulk_update(updated_tasks, ['priority'])
+
+        return HttpResponseRedirect(self.get_success_url())
 
 
 class GenericTaskDeleteView(AuthorisedTaskManager, DeleteView):

@@ -27,59 +27,7 @@ class TaskCreateForm(ModelForm):
         model = Task
         fields = ['title', 'description', 'priority', 'completed']
 
-
-class GenericTaskCreateView(LoginRequiredMixin, CreateView):
-    form_class = TaskCreateForm
-    template_name = 'task_create.html'
-    extra_context = {'title': 'Create Todo'}
-    success_url = '/tasks'
-
-    def form_valid(self, form):
-        self.object = form.save()
-        self.object.user = self.request.user
-        self.object.save()
-
-        priority = self.object.priority
-
-        updated_tasks = []
-
-        with transaction.atomic():
-            # lock the tasks table...
-            tasks = Task.objects.filter(deleted=False, user=self.request.user).select_for_update()
-            # task having the same priority as the new task need to be updated..
-            task_to_update = tasks.filter(priority=priority).exclude(pk=self.object.id)
-
-            # while new priority exists, update the priority of the task...
-            while task_to_update.exists():
-                excluded_task_id = task_to_update[0].id
-
-                # update task priority...
-                curr_task = tasks.get(id=excluded_task_id)
-                curr_task.priority = F('priority') + 1
-                updated_tasks.append(curr_task)
-
-                # increment the priority of the task...
-                priority += 1
-                task_to_update = tasks.filter(priority=priority).exclude(pk=excluded_task_id)
-
-            # bulk update the tasks...
-            Task.objects.bulk_update(updated_tasks, ['priority'])
-
-        return HttpResponseRedirect(self.get_success_url())
-
-
-class GenericTaskDetailView(AuthorisedTaskManager, DetailView):
-    model = Task
-    template_name = 'task_details.html'
-    extra_context = {'title': 'Task Details'}
-
-
-class GenericTaskUpdateView(AuthorisedTaskManager, UpdateView):
-    model = Task
-    form_class = TaskCreateForm
-    template_name = 'task_update.html'
-    extra_context = {'title': 'Update Todo'}
-    success_url = '/tasks'
+class PriorityCascadingLogic():
 
     def form_valid(self, form):
         self.object = form.save()
@@ -113,6 +61,26 @@ class GenericTaskUpdateView(AuthorisedTaskManager, UpdateView):
             Task.objects.bulk_update(updated_tasks, ['priority'])
 
         return HttpResponseRedirect(self.get_success_url())
+
+class GenericTaskCreateView(LoginRequiredMixin, PriorityCascadingLogic, CreateView):
+    form_class = TaskCreateForm
+    template_name = 'task_create.html'
+    extra_context = {'title': 'Create Todo'}
+    success_url = '/tasks'
+
+
+class GenericTaskDetailView(AuthorisedTaskManager, DetailView):
+    model = Task
+    template_name = 'task_details.html'
+    extra_context = {'title': 'Task Details'}
+
+
+class GenericTaskUpdateView(AuthorisedTaskManager, PriorityCascadingLogic, UpdateView):
+    model = Task
+    form_class = TaskCreateForm
+    template_name = 'task_update.html'
+    extra_context = {'title': 'Update Todo'}
+    success_url = '/tasks'
 
 
 class GenericTaskDeleteView(AuthorisedTaskManager, DeleteView):

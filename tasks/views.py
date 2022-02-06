@@ -40,7 +40,7 @@ class PriorityCascadingLogic():
 
         with transaction.atomic():
             
-            tasks = Task.objects.filter(deleted=False, user=self.request.user).exclude(pk=self.object.id).select_for_update().order_by('priority')
+            tasks = Task.objects.filter(deleted=False, completed=False, user=self.request.user).exclude(pk=self.object.id).select_for_update().order_by('priority')
             for task in tasks:
                 if task.priority == priority:
                     task.priority = priority + 1
